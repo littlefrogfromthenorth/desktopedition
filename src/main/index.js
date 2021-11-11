@@ -49,27 +49,25 @@ const displayPermissionDeniedWarning = (browserWindow, permissionType) => {
     let message;
     switch (permissionType) {
     case 'camera':
-        title = 'Camera Permission Denied';
-        message = 'Permission to use the camera has been denied. ' +
-            'Scratch will not be able to take a photo or use video sensing blocks.';
+        title = '摄像头访问被拒绝';
+        message = 'ClipCC 无法访问您的摄像头，这可能会导致部分功能无法正常工作';
         break;
     case 'microphone':
-        title = 'Microphone Permission Denied';
-        message = 'Permission to use the microphone has been denied. ' +
-            'Scratch will not be able to record sounds or detect loudness.';
+        title = '麦克风访问被拒绝';
+        message = 'ClipCC 无法访问您的麦克风，这可能会导致部分功能无法正常工作';
         break;
     default: // shouldn't ever happen...
-        title = 'Permission Denied';
-        message = 'A permission has been denied.';
+        title = '权限错误';
+        message = 'ClipCC 无法使用某些权限，这可能会导致部分功能无法正常工作';
     }
 
     let instructions;
     switch (process.platform) {
     case 'darwin':
-        instructions = 'To change Scratch permissions, please check "Security & Privacy" in System Preferences.';
+        instructions = '要修复这个问题，请在系统设置中点击 “安全” 选项';
         break;
     default:
-        instructions = 'To change Scratch permissions, please check your system settings and restart Scratch.';
+        instructions = '请检查系统设置之后重启';
         break;
     }
     message = `${message}\n\n${instructions}`;
@@ -171,7 +169,8 @@ const createWindow = ({search = null, url = 'index.html', ...browserWindowOption
         useContentSize: true,
         show: false,
         webPreferences: {
-            nodeIntegration: true
+            nodeIntegration: true,
+            contextIsolation: false
         },
         ...browserWindowOptions
     });
@@ -244,6 +243,8 @@ const createMainWindow = () => {
         title: `${productName} ${version}` // something like "Scratch 3.14"
     });
     const webContents = window.webContents;
+	let downloadPath;
+	let alreadyHavePath = false;
 
     webContents.session.on('will-download', (willDownloadEvent, downloadItem) => {
         const isProjectSave = getIsProjectSave(downloadItem);
@@ -257,7 +258,20 @@ const createMainWindow = () => {
             const extNameNoDot = extName.replace(/^\./, '');
             options.filters = [getFilterForExtension(extNameNoDot)];
         }
-        const userChosenPath = dialog.showSaveDialogSync(window, options);
+
+		let userChosenPath;
+
+		if (alreadyHavePath) {
+			userChosenPath = downloadPath;
+		} else {
+			// 获取路径
+			downloadPath = dialog.showSaveDialogSync(window, options);
+
+			alreadyHavePath = true;
+
+			userChosenPath = downloadPath;
+		}
+
         // this will be falsy if the user canceled the save
         if (userChosenPath) {
             const userBaseName = path.basename(userChosenPath);
@@ -291,7 +305,7 @@ const createMainWindow = () => {
                     // don't clean up until after the message box to allow troubleshooting / recovery
                     await dialog.showMessageBox(window, {
                         type: 'error',
-                        message: `Save failed:\n${userChosenPath}`,
+                        message: `无法保存位于: ${userChosenPath} 的作品文件`,
                         detail: e.message
                     });
                     fs.exists(tempPath).then(exists => {
@@ -302,6 +316,12 @@ const createMainWindow = () => {
                 }
             });
         } else {
+			dialog.showMessageBoxSync(window, {
+				type: 'info',
+				message: '保存文件',
+				detail: '用户取消了保存',
+				buttons: ['确定']
+			});
             downloadItem.cancel();
             if (isProjectSave) {
                 telemetry.projectSaveCanceled();
@@ -312,9 +332,9 @@ const createMainWindow = () => {
     webContents.on('will-prevent-unload', ev => {
         const choice = dialog.showMessageBoxSync(window, {
             type: 'question',
-            message: 'Leave Scratch?',
-            detail: 'Any unsaved changes will be lost.',
-            buttons: ['Stay', 'Leave'],
+            message: '确定要退出 ClipCC?',
+            detail: '系统可能不会保存你的更改.',
+            buttons: ['取消', '确定'],
             cancelId: 0, // closing the dialog means "stay"
             defaultId: 0 // pressing enter or space without explicitly selecting something means "stay"
         });
@@ -384,6 +404,7 @@ app.on('ready', () => {
     _windows.main = createMainWindow();
     _windows.main.on('closed', () => {
         delete _windows.main;
+        app.quit();
     });
     _windows.about = createAboutWindow();
     _windows.about.on('close', event => {
@@ -405,6 +426,7 @@ ipcMain.on('open-privacy-policy-window', () => {
     _windows.privacy.show();
 });
 
+
 // start loading initial project data before the GUI needs it so the load seems faster
 const initialProjectDataPromise = (async () => {
     if (argv._.length === 0) {
@@ -421,8 +443,8 @@ const initialProjectDataPromise = (async () => {
     } catch (e) {
         dialog.showMessageBox(_windows.main, {
             type: 'error',
-            title: 'Failed to load project',
-            message: `Could not load project from file:\n${projectPath}`,
+            title: '不能加载作品文件',
+            message: `不能加载位于 ： ${projectPath} 的作品文件.`,
             detail: e.message
         });
     }
